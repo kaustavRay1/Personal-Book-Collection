@@ -17,7 +17,7 @@ def extract_book_info(image_bytes: bytes) -> dict:
 
         # Ask Gemini to extract the book info and return strict JSON
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-3.5-flash',
             contents=[
                 image,
                 "Analyze this book cover image. Extract the book title and the author's name. Return ONLY a valid JSON object with the keys 'title' and 'author'. Do not include markdown formatting like ```json."
