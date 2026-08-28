@@ -4,7 +4,7 @@ import { signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, query, serverTimestamp } from 'firebase/firestore';
 import './App.css';
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "https://personal-book-collection-backend.onrender.com";
 
 export default function App() {
   const [user, setUser] = useState(null);
