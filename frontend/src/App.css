@@ -1,13 +1,14 @@
 :root {
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --bg-color: #f1f5f9;       /* Slightly deeper light background for better card contrast */
-  --card-bg: #ffffff;
-  --text-main: #0f172a;      /* Darker, high-contrast text for headings and body in light mode */
-  --text-muted: #475569;     /* Darker muted text so subtitles are clearly legible */
-  --border-color: #cbd5e1;   /* Clearer borders for light mode cards */
+:root {
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --bg-color: #f8fafc;       /* Light gray screen background */
+  --card-bg: #ffffff;        /* Pure white cards */
+  --text-main: #000000;      /* Pure black for crystal clear headings */
+  --text-muted: #334155;     /* Dark slate for readable subtitles */
+  --border-color: #94a3b8;   /* Bold, clear borders */
   --radius: 12px;
-  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.15);
 }
 
 body.dark-mode {
