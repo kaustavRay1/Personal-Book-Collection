@@ -1,11 +1,11 @@
 :root {
   --primary: #4f46e5;
   --primary-hover: #4338ca;
-  --bg-color: #f8fafc;
+  --bg-color: #f1f5f9;       /* Slightly deeper light background for better card contrast */
   --card-bg: #ffffff;
-  --text-main: #1e293b;
-  --text-muted: #64748b;
-  --border-color: #e2e8f0;
+  --text-main: #0f172a;      /* Darker, high-contrast text for headings and body in light mode */
+  --text-muted: #475569;     /* Darker muted text so subtitles are clearly legible */
+  --border-color: #cbd5e1;   /* Clearer borders for light mode cards */
   --radius: 12px;
   --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
 }
@@ -54,8 +54,8 @@ body {
 
 .header h1 {
   font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--primary);
+  font-weight: 800; /* Bolder headings for crisp visibility */
+  color: var(--text-main);
   margin: 0;
 }
 
@@ -86,7 +86,8 @@ body {
   margin-top: 0;
   margin-bottom: 1.25rem;
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--text-main);
 }
 
 form {
@@ -142,30 +143,30 @@ button:disabled {
 }
 
 .result-box.in-stock {
-  background-color: rgba(239, 68, 68, 0.15);
+  background-color: rgba(239, 68, 68, 0.1);
   border-color: rgba(239, 68, 68, 0.3);
-  color: #f87171;
+  color: #b91c1c; /* Deepened red for readability on light backgrounds */
 }
 
 .result-box.not-in-stock {
-  background-color: rgba(16, 185, 129, 0.15);
+  background-color: rgba(16, 185, 129, 0.1);
   border-color: rgba(16, 185, 129, 0.3);
-  color: #34d399;
+  color: #047857; /* Deepened green for readability on light backgrounds */
 }
 
 .status-message {
-  font-weight: 600;
+  font-weight: 700;
   margin-bottom: 0.75rem;
 }
 
 .btn-add {
   margin-top: 1rem;
-  background-color: #10b981;
+  background-color: #059669;
   width: 100%;
 }
 
 .btn-add:hover {
-  background-color: #059669;
+  background-color: #047857;
 }
 
 .book-list {
