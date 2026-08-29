@@ -1,8 +1,22 @@
-from duckduckgo_search import DDGS
-import re
-from fastapi import FastAPI, HTTPException
+import requests
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import ocr_utils
 
-app = FastAPI()
+app = FastAPI(title="Personal Book Collection Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.post("/extract-text/")
+async def extract_text(file: UploadFile = File(...)):
+    contents = await file.read()
+    return ocr_utils.extract_book_info(contents)
 
 @app.get("/lookup-isbn/{isbn}")
 def lookup_isbn(isbn: str):
@@ -11,51 +25,73 @@ def lookup_isbn(isbn: str):
     if not clean_isbn:
         raise HTTPException(status_code=400, detail="ISBN number cannot be empty.")
     
+    headers = {"User-Agent": "PersonalBookCollectionApp/1.0 (contact@example.com)"}
+    
+    # ==========================================
+    # PRIMARY SOURCE: Open Library (Global + Regional)
+    # ==========================================
     try:
-        # Search explicitly for the ISBN on regional and global retail platforms
-        query = f'"{clean_isbn}" book'
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=6))
-            
-        title = None
-        author = None
+        ol_url = f"https://openlibrary.org/search.json?isbn={clean_isbn}"
+        res = requests.get(ol_url, headers=headers)
         
-        for r in results:
-            t = r.get("title", "")
-            body = r.get("body", "")
-            combined_text = f"{t} {body}"
+        if res.status_code == 200:
+            docs = res.json().get("docs", [])
+            if not docs:
+                broad_res = requests.get(f"https://openlibrary.org/search.json?q={clean_isbn}", headers=headers)
+                if broad_res.status_code == 200:
+                    docs = broad_res.json().get("docs", [])
             
-            # Check if this specific search result references our target ISBN
-            if clean_isbn in combined_text:
-                
-                # 1. Extract Title dynamically from common ecommerce title formats
-                # e.g., "Psychology of War | Book Hardcover ( DeepTrivedi)" or "Buy Psychology Of War book"
-                clean_title = t.split("|")[0].split("-")[0].replace("Buy", "").replace("book", "").strip()
-                if clean_title and len(clean_title) > 2 and not title:
-                    title = clean_title
-                
-                # 2. Extract Author dynamically using regex for patterns like "by Deep Trivedi" or "( DeepTrivedi)"
-                author_match = re.search(r'(?:by\s+|-\s*|\(\s*)([A-Z][a-z]+\s+[A-Z][a-z]+)', combined_text)
-                if author_match and not author:
-                    potential_author = author_match.group(1).strip()
-                    # Filter out common false positives like company names
-                    if "Aatman Innovations" not in potential_author:
-                        author = potential_author
-                        
-        if title:
-            # Clean up trailing artifacts if any remain
-            title = title.replace("Psychology Of War", "Psychology of War").strip()
-            
-            return {
-                "title": title,
-                "author": author if author else "Unknown Author",
-                "isbn": clean_isbn
-            }
-            
+            if docs:
+                match = docs[0]
+                authors_list = match.get("author_name", ["Unknown Author"])
+                return {
+                    "title": match.get("title", "Unknown Title"),
+                    "author": authors_list[0] if authors_list else "Unknown Author",
+                    "isbn": clean_isbn,
+                    "source": "Open Library"
+                }
     except Exception as e:
-        print(f"Search error: {e}")
+        print(f"Open Library lookup error: {e}")
 
+    # ==========================================
+    # BACKUP SOURCE: Google Books API
+    # ==========================================
+    try:
+        gb_url = f"https://www.googleapis.com/books/v1/volumes?q=isbn:{clean_isbn}"
+        gb_res = requests.get(gb_url)
+        
+        if gb_res.status_code == 200:
+            gb_data = gb_res.json()
+            if gb_data.get("totalItems", 0) > 0:
+                volume_info = gb_data["items"][0].get("volumeInfo", {})
+                authors = volume_info.get("authors", ["Unknown Author"])
+                return {
+                    "title": volume_info.get("title", "Unknown Title"),
+                    "author": authors[0] if authors else "Unknown Author",
+                    "isbn": clean_isbn,
+                    "source": "Google Books"
+                }
+                
+        # Handle Rate Limit Exceeded (429) with explicit retry time instructions
+        elif gb_res.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "Google Books API rate limit exceeded.",
+                    "retry_after_seconds": 60,
+                    "message": "Google Books quota reached. Please retry in 60 seconds or use AI Cover Scan."
+                }
+            )
+            
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        print(f"Google Books fallback error: {e}")
+
+    # ==========================================
+    # FINAL FALLBACK: Not Found
+    # ==========================================
     raise HTTPException(
         status_code=404, 
-        detail="Book details could not be parsed automatically. Use AI Cover Scan!"
+        detail="Book not found in public databases. Use AI Cover Scan to add it!"
     )
