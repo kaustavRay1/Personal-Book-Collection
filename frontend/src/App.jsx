@@ -15,15 +15,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
 
-  // Scanner Mode: 'cover' (AI) or 'isbn' (Barcode)
+  // Scanner Modes: 'cover', 'isbn' (live barcode), or 'snap-isbn' (photo of digits)
   const [scannerMode, setScannerMode] = useState('cover');
 
-  // Camera stream states for Cover AI scan
+  // Camera stream states
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-
-  // Barcode scanner reference cleanup tracker
   const scannerRef = useRef(null);
 
   useEffect(() => {
@@ -55,7 +53,7 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // Handle ISBN Barcode Scan via Html5QrcodeScanner
+  // Handle ISBN Live Barcode Scan via Html5QrcodeScanner
   useEffect(() => {
     if (scannerMode === 'isbn' && user) {
       const scanner = new Html5QrcodeScanner(
@@ -67,13 +65,10 @@ export default function App() {
 
       scanner.render(
         async (decodedText) => {
-          // Successfully scanned barcode
           scanner.clear().catch(() => {});
           lookupIsbn(decodedText);
         },
-        (error) => {
-          // Ignore scanning frame errors
-        }
+        (error) => {}
       );
 
       return () => {
@@ -88,11 +83,11 @@ export default function App() {
     setLoading(true);
     setScanResult(null);
     try {
-      const res = await fetch(`${API_BASE}/lookup-isbn/${isbn}`);
+      const res = await fetch(`${API_BASE}/lookup-isbn/${isbn.trim()}`);
       const data = await res.json();
       
       if (!res.ok) {
-        alert(data.detail || "Book not found for this barcode.");
+        alert(data.detail || "Book not found for this ISBN.");
         setLoading(false);
         return;
       }
@@ -106,7 +101,6 @@ export default function App() {
     }
   };
 
-  // Start live webcam stream for cover photo
   const startCamera = async () => {
     setIsCameraOpen(true);
     setScanResult(null);
@@ -122,7 +116,6 @@ export default function App() {
     }
   };
 
-  // Stop live webcam stream
   const stopCamera = () => {
     if (videoRef.current && videoRef.current.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
@@ -131,8 +124,8 @@ export default function App() {
     setIsCameraOpen(false);
   };
 
-  // Capture image from video stream
-  const capturePhoto = () => {
+  // Capture Cover Photo (AI Scan)
+  const captureCoverPhoto = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
@@ -150,9 +143,50 @@ export default function App() {
     }, 'image/jpeg');
   };
 
+  // Capture Snapshot of ISBN text/digits
+  const captureIsbnSnapshot = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(async (blob) => {
+      const file = new File([blob], "isbn-snapshot.jpg", { type: "image/jpeg" });
+      stopCamera();
+      
+      setLoading(true);
+      setScanResult(null);
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        // Sends photo to backend to extract text, find ISBN, and lookup title/author
+        const res = await fetch(`${API_BASE}/extract-text/`, { method: 'POST', body: formData });
+        const data = await res.json();
+        
+        if (data.isbn) {
+          lookupIsbn(data.isbn);
+        } else if (data.title) {
+          checkStockAndSetResult(data);
+        } else {
+          alert("Could not detect ISBN digits clearly from this photo.");
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("ISBN snapshot error:", err);
+        alert("Error processing ISBN photo.");
+        setLoading(false);
+      }
+    }, 'image/jpeg');
+  };
+
   const processImageScan = async (fileToScan) => {
     if (!fileToScan) return;
-
     setLoading(true);
     setScanResult(null);
 
@@ -247,23 +281,30 @@ export default function App() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h3 style={{ margin: 0 }}>🔍 Check Stock</h3>
-            <div style={{ display: 'flex', gap: '5px' }}>
+            <div style={{ display: 'flex', gap: '4px' }}>
               <button 
                 onClick={() => { setScannerMode('cover'); setScanResult(null); stopCamera(); }}
-                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', backgroundColor: scannerMode === 'cover' ? 'var(--primary)' : '#64748b' }}
+                style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem', backgroundColor: scannerMode === 'cover' ? 'var(--primary)' : '#64748b' }}
               >
                 AI Cover
               </button>
               <button 
                 onClick={() => { setScannerMode('isbn'); setScanResult(null); stopCamera(); }}
-                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', backgroundColor: scannerMode === 'isbn' ? 'var(--primary)' : '#64748b' }}
+                style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem', backgroundColor: scannerMode === 'isbn' ? 'var(--primary)' : '#64748b' }}
               >
-                ISBN Barcode
+                Live Barcode
+              </button>
+              <button 
+                onClick={() => { setScannerMode('snap-isbn'); setScanResult(null); stopCamera(); }}
+                style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem', backgroundColor: scannerMode === 'snap-isbn' ? 'var(--primary)' : '#64748b' }}
+              >
+                Snap ISBN Photo
               </button>
             </div>
           </div>
 
-          {scannerMode === 'cover' ? (
+          {/* Mode 1: AI Cover Scan */}
+          {scannerMode === 'cover' && (
             <div>
               {!isCameraOpen ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -291,7 +332,7 @@ export default function App() {
                   <canvas ref={canvasRef} style={{ display: 'none' }} />
                   
                   <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
-                    <button onClick={capturePhoto} style={{ flex: 1, backgroundColor: '#10b981' }}>
+                    <button onClick={captureCoverPhoto} style={{ flex: 1, backgroundColor: '#10b981' }}>
                       🎯 Snap & Scan
                     </button>
                     <button onClick={stopCamera} style={{ flex: 1, backgroundColor: '#64748b' }}>
@@ -301,13 +342,47 @@ export default function App() {
                 </div>
               )}
             </div>
-          ) : (
+          )}
+
+          {/* Mode 2: Live Barcode Scanner */}
+          {scannerMode === 'isbn' && (
             <div>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
                 Point your camera at the barcode on the back of the book.
               </p>
               <div id="reader" style={{ width: '100%', marginBottom: '1rem' }}></div>
               {loading && <p style={{ textAlign: 'center', fontWeight: 'bold' }}>Looking up ISBN barcode...</p>}
+            </div>
+          )}
+
+          {/* Mode 3: Snap ISBN Photo Snapshot */}
+          {scannerMode === 'snap-isbn' && (
+            <div>
+              {!isCameraOpen ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
+                    Snap a quick photo of the ISBN digits/barcode on the back of the book:
+                  </p>
+                  <button onClick={startCamera} style={{ backgroundColor: '#0284c7' }}>
+                    📸 Open Camera to Snap ISBN
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
+                  <video ref={videoRef} autoPlay playsInline style={{ width: '100%', borderRadius: '8px', maxHeight: '300px', objectFit: 'cover' }} />
+                  <canvas ref={canvasRef} style={{ display: 'none' }} />
+                  
+                  <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+                    <button onClick={captureIsbnSnapshot} style={{ flex: 1, backgroundColor: '#10b981' }}>
+                      🎯 Snap & Fetch ISBN
+                    </button>
+                    <button onClick={stopCamera} style={{ flex: 1, backgroundColor: '#64748b' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              {loading && <p style={{ textAlign: 'center', fontWeight: 'bold', marginTop: '1rem' }}>Fetching book info...</p>}
             </div>
           )}
 
@@ -331,7 +406,7 @@ export default function App() {
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <h3>🏠 My Home Library ({myBooks.length})</h3>
           {myBooks.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)' }}>No books in stock yet. Scan a book cover or barcode above!</p>
+            <p style={{ color: 'var(--text-muted)' }}>No books in stock yet. Scan a book cover or snapshot above!</p>
           ) : (
             <ul className="book-list">
               {myBooks.map((b) => (
