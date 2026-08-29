@@ -6,3 +6,6 @@ python-multipart
 python-dotenv
 requests
 ddgs
+opencv-contrib-python
+numpy
+pydantic
