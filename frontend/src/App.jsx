@@ -165,16 +165,19 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/scan-barcode/`, { method: 'POST', body: formData });
       const data = await res.json();
+      console.log("📥 Raw Scan API Response:", data);
       
       if (!res.ok) {
         alert(data.detail || "Could not read barcode.");
         setLoading(false);
+        console.log("📥 Raw Scan API Response:", data);
         return;
       }
 
       // Automatically trigger ISBN lookup using the decoded barcode number
       setManualIsbn(data.isbn);
       lookupIsbn(data.isbn);
+      console.log("📥 Raw Scan API Response:", data);
     } catch (err) {
       alert("Error scanning barcode image.");
       setLoading(false);
