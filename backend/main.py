@@ -22,26 +22,27 @@ async def extract_text(file: UploadFile = File(...)):
 
 @app.get("/lookup-isbn/{isbn}")
 def lookup_isbn(isbn: str):
-    """Queries Open Library public database using a clean ISBN number."""
     clean_isbn = isbn.replace("-", "").strip()
     
-    url = f"https://openlibrary.org/api/books?bibkeys=ISBN:{clean_isbn}&format=json&jscmd=data"
+    # Use Open Library Search API instead of strict bibkeys
+    url = f"https://openlibrary.org/search.json?q={clean_isbn}"
     response = requests.get(url)
     
     if response.status_code != 200:
         raise HTTPException(status_code=404, detail="Could not reach book database.")
         
     data = response.json()
-    book_key = f"ISBN:{clean_isbn}"
+    docs = data.get("docs", [])
     
-    if book_key not in data:
+    if not docs:
         raise HTTPException(status_code=404, detail="Book not found for this ISBN.")
         
-    book_info = data[book_key]
-    title = book_info.get("title", "Unknown Title")
+    # Grab the first matching book from search results
+    best_match = docs[0]
+    title = best_match.get("title", "Unknown Title")
     
-    authors_list = book_info.get("authors", [])
-    author = authors_list[0].get("name", "Unknown Author") if authors_list else "Unknown Author"
+    authors_list = best_match.get("author_name", ["Unknown Author"])
+    author = authors_list[0] if authors_list else "Unknown Author"
     
     return {
         "title": title,
