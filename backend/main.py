@@ -1,7 +1,7 @@
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 import ocr_utils
 
 app = FastAPI(title="Personal Book Collection Backend")
