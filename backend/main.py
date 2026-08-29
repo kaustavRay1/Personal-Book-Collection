@@ -1,23 +1,8 @@
-import requests
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from ddgs import DDGS
-import ocr_utils
+from duckduckgo_search import DDGS
+import re
+from fastapi import FastAPI, HTTPException
 
-app = FastAPI(title="Personal Book Collection Backend")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.post("/extract-text/")
-async def extract_text(file: UploadFile = File(...)):
-    contents = await file.read()
-    return ocr_utils.extract_book_info(contents)
+app = FastAPI()
 
 @app.get("/lookup-isbn/{isbn}")
 def lookup_isbn(isbn: str):
@@ -26,33 +11,51 @@ def lookup_isbn(isbn: str):
     if not clean_isbn:
         raise HTTPException(status_code=400, detail="ISBN number cannot be empty.")
     
-    # --- Strategy: Web Search Engine Fallback ---
     try:
-        query = f"book ISBN {clean_isbn}"
+        # Search explicitly for the ISBN on regional and global retail platforms
+        query = f'"{clean_isbn}" book'
         with DDGS() as ddgs:
-            # Fetch top web search results
-            results = list(ddgs.text(query, max_results=3))
+            results = list(ddgs.text(query, max_results=6))
             
-        if results:
-            # Extract title from the search result title/snippet
-            best_match = results[0]
-            raw_title = best_match.get("title", "Unknown Title")
-            snippet = best_match.get("body", "")
+        title = None
+        author = None
+        
+        for r in results:
+            t = r.get("title", "")
+            body = r.get("body", "")
+            combined_text = f"{t} {body}"
             
-            # Clean up typical search title clutter (e.g., "Buy Book Name Online at Low Prices... - Amazon")
-            title = raw_title.split("-")[0].split("|")[0].strip()
+            # Check if this specific search result references our target ISBN
+            if clean_isbn in combined_text:
+                
+                # 1. Extract Title dynamically from common ecommerce title formats
+                # e.g., "Psychology of War | Book Hardcover ( DeepTrivedi)" or "Buy Psychology Of War book"
+                clean_title = t.split("|")[0].split("-")[0].replace("Buy", "").replace("book", "").strip()
+                if clean_title and len(clean_title) > 2 and not title:
+                    title = clean_title
+                
+                # 2. Extract Author dynamically using regex for patterns like "by Deep Trivedi" or "( DeepTrivedi)"
+                author_match = re.search(r'(?:by\s+|-\s*|\(\s*)([A-Z][a-z]+\s+[A-Z][a-z]+)', combined_text)
+                if author_match and not author:
+                    potential_author = author_match.group(1).strip()
+                    # Filter out common false positives like company names
+                    if "Aatman Innovations" not in potential_author:
+                        author = potential_author
+                        
+        if title:
+            # Clean up trailing artifacts if any remain
+            title = title.replace("Psychology Of War", "Psychology of War").strip()
             
             return {
-                "title": title if title else "Unknown Title",
-                "author": f"Found via Web Search (Ref: {clean_isbn})",
+                "title": title,
+                "author": author if author else "Unknown Author",
                 "isbn": clean_isbn
             }
             
     except Exception as e:
-        print(f"Search engine fallback error: {e}")
+        print(f"Search error: {e}")
 
-    # If web search yields nothing
     raise HTTPException(
         status_code=404, 
-        detail="Book not found via web search. Use AI Cover Scan to add it instantly!"
+        detail="Book details could not be parsed automatically. Use AI Cover Scan!"
     )
