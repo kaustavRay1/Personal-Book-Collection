@@ -23,7 +23,6 @@ class ManualBookCreate(BaseModel):
 
 @app.post("/scan-barcode/")
 async def scan_barcode(file: UploadFile = File(...)):
-    """Deployment-safe barcode scan using OpenCV's native BarcodeDetector."""
     try:
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
@@ -32,36 +31,46 @@ async def scan_barcode(file: UploadFile = File(...)):
         if img is None:
             raise HTTPException(status_code=400, detail="Invalid image file uploaded.")
             
-        # Initialize OpenCV's built-in barcode detector (No system libraries required!)
         detector = cv2.barcode.BarcodeDetector()
         retval, decoded_info, decoded_type = detector.detectAndDecode(img)
         
         isbn_number = None
-        if retval and decoded_info:
-            for code in decoded_info:
-                # Check for standard 13-digit ISBN prefixes
-                if code.startswith(("978", "979")) and len(code) == 13:
-                    isbn_number = code
-                    break
-                elif len(code) in [10, 13]:
-                    isbn_number = code
-                    break
-                    
+        if retval and decoded_info is not None:
+            # Safely normalize decoded_info into a standard Python list of strings
+            if isinstance(decoded_info, np.ndarray):
+                codes = decoded_info.flatten().tolist()
+            elif isinstance(decoded_info, (list, tuple)):
+                codes = list(decoded_info)
+            else:
+                codes = [str(decoded_info)]
+            
+            for code in codes:
+                if code:
+                    clean_code = str(code).strip()
+                    # Check for standard 13-digit ISBN or 10-digit ISBN
+                    if (clean_code.startswith(("978", "979")) and len(clean_code) == 13) or len(clean_code) == 10:
+                        isbn_number = clean_code
+                        break
+                    elif clean_code:  # Fallback to the first available string code found
+                        isbn_number = clean_code
+                        break
+                        
         if not isbn_number:
             raise HTTPException(
                 status_code=400, 
-                detail="No valid ISBN barcode found. Please use AI Cover Scan or insert manually."
+                detail="No valid ISBN barcode found. Try holding the camera steadier or use AI Cover Scan."
             )
             
         return {
             "status": "success",
             "isbn": isbn_number,
-            "message": "Barcode scanned successfully!"
+            "message": "ISBN barcode scanned successfully!"
         }
         
     except HTTPException as he:
         raise he
     except Exception as e:
+        print(f"❌ [DEBUG] Server error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Server error during barcode scan: {str(e)}")
     
 @app.post("/extract-text/")
