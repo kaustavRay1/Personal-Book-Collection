@@ -5,3 +5,4 @@ pillow
 python-multipart
 python-dotenv
 requests
+duckduckgo_search
