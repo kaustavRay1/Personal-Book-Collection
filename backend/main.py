@@ -1,14 +1,9 @@
-import os
-import json
-import time
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import cv2
 import numpy as np
-from google import genai
-from google.genai import types  # Required for free-tier token/temperature configs
 import ocr_utils
 
 app = FastAPI(title="Personal Book Collection Backend")
@@ -21,9 +16,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Gemini Client (Ensure GEMINI_API_KEY is set in your environment variables on Render)
-ai_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
-
 class ManualBookCreate(BaseModel):
     title: str
     author: str
@@ -31,7 +23,7 @@ class ManualBookCreate(BaseModel):
 
 @app.post("/scan-barcode/")
 async def scan_barcode(file: UploadFile = File(...)):
-    """Optimized Barcode Scan: Preprocesses image to grayscale for higher detection accuracy."""
+    """Dedicated ISBN Barcode Scanner: Preprocesses image to extract book ISBN-13 or ISBN-10 barcodes."""
     try:
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
@@ -42,11 +34,11 @@ async def scan_barcode(file: UploadFile = File(...)):
             
         detector = cv2.barcode.BarcodeDetector()
         
-        # Pass 1: Grayscale check
+        # Pass 1: Try decoding on a grayscale version for higher edge-contrast detection
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         retval, decoded_info, decoded_type = detector.detectAndDecode(gray)
         
-        # Pass 2: Color check fallback
+        # Pass 2: Fallback to color image if grayscale scan doesn't catch it
         if not retval or not decoded_info:
             retval, decoded_info, decoded_type = detector.detectAndDecode(img)
         
@@ -62,17 +54,15 @@ async def scan_barcode(file: UploadFile = File(...)):
             for code in codes:
                 if code:
                     clean_code = str(code).strip()
+                    # Strictly validate standard book ISBN formats (ISBN-13 starting with 978/979 or ISBN-10)
                     if (clean_code.startswith(("978", "979")) and len(clean_code) == 13) or len(clean_code) == 10:
-                        isbn_number = clean_code
-                        break
-                    elif clean_code: 
                         isbn_number = clean_code
                         break
                         
         if not isbn_number:
             raise HTTPException(
                 status_code=400, 
-                detail="No valid ISBN barcode found. Try holding the camera steadier or use AI Cover Scan."
+                detail="No valid book ISBN barcode found. Try holding the camera steadier or use AI Cover Scan."
             )
             
         return {
@@ -112,7 +102,7 @@ def add_manual_book(book: ManualBookCreate):
 
 @app.get("/lookup-isbn/{isbn}")
 def lookup_isbn(isbn: str):
-    """ISBN Text Lookup: Open Library -> Google Books -> Gemini 3 Family Fallback."""
+    """ISBN Text Lookup: Open Library -> Google Books (No AI Fallbacks)."""
     clean_isbn = isbn.replace("-", "").strip()
     
     if not clean_isbn:
@@ -120,9 +110,7 @@ def lookup_isbn(isbn: str):
     
     headers = {"User-Agent": "PersonalBookCollectionApp/1.0 (contact@example.com)"}
     
-    # ==========================================
-    # 1. PRIMARY SOURCE: Open Library
-    # ==========================================
+    # 1. Primary Source: Open Library
     try:
         ol_url = f"https://openlibrary.org/search.json?isbn={clean_isbn}"
         res = requests.get(ol_url, headers=headers)
@@ -146,9 +134,7 @@ def lookup_isbn(isbn: str):
     except Exception as e:
         print(f"Open Library lookup error: {e}")
 
-    # ==========================================
-    # 2. SECONDARY SOURCE: Google Books API
-    # ==========================================
+    # 2. Secondary Source: Google Books API
     try:
         gb_url = f"https://www.googleapis.com/books/v1/volumes?q=isbn:{clean_isbn}"
         gb_res = requests.get(gb_url)
@@ -166,73 +152,22 @@ def lookup_isbn(isbn: str):
                 }
                 
         elif gb_res.status_code == 429:
-            print("⚠️ Google Books rate limit hit (429). Proceeding to Gemini 3 Fallback.")
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "Google Books API rate limit exceeded.",
+                    "retry_after_seconds": 60,
+                    "message": "Google Books quota reached. Please use AI Cover Scan or insert manually."
+                }
+            )
             
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        print(f"Google Books fallback error: {e}")
+        print(f"Google Books lookup error: {e}")
 
-    # ==========================================
-    # 3. THIRD BACKUP: Gemini 3 Family Fallback (Optimized for Free Tier)
-    # ==========================================
-    gemini_data = None
-    # Cascading across Gemini 3 models to gracefully bypass 503 traffic spikes
-    fallback_models = ['gemini-3.7-flash', 'gemini-3.5-flash-lite']
-
-    for model_name in fallback_models:
-        if gemini_data:
-            break
-            
-        for attempt in range(2):
-            try:
-                print(f"⚠️ Querying Gemini AI ({model_name}) fallback (Attempt {attempt + 1})...")
-                prompt = (
-                    f"Provide the book title and primary author associated with the ISBN: {clean_isbn}. "
-                    "Return ONLY a clean JSON object with keys 'title' and 'author'. "
-                    "If unknown, set both to 'Unknown'."
-                )
-                
-                # Free-tier optimizations: restrict token length and enforce low temperature
-                response = ai_client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        max_output_tokens=150,
-                        temperature=0.0
-                    )
-                )
-                
-                text_response = response.text.strip()
-                if text_response.startswith("```"):
-                    text_response = text_response.split("```")[1]
-                    if text_response.startswith("json"):
-                        text_response = text_response[4:].strip()
-                        
-                gemini_data = json.loads(text_response)
-                
-                if gemini_data and gemini_data.get("title") and gemini_data.get("title") != "Unknown":
-                    break
-                else:
-                    gemini_data = None
-                    
-            except Exception as e:
-                print(f"❌ Model {model_name} attempt {attempt + 1} error: {e}")
-                if "503" in str(e) or "UNAVAILABLE" in str(e):
-                    time.sleep(1)
-                else:
-                    break
-
-    if gemini_data and gemini_data.get("title") and gemini_data.get("title") != "Unknown":
-        return {
-            "title": gemini_data.get("title"),
-            "author": gemini_data.get("author", "Unknown Author"),
-            "isbn": clean_isbn,
-            "source": "Gemini AI Fallback"
-        }
-
-    # ==========================================
-    # FINAL FALLBACK: Not Found Error
-    # ==========================================
+    # Final Fallback if not found in public catalogs
     raise HTTPException(
         status_code=404, 
-        detail="Book not found. Use AI Cover Scan or insert manually."
+        detail="Book not found in public databases. Use AI Cover Scan or insert manually."
     )
