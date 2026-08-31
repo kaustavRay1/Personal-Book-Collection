@@ -21,7 +21,7 @@ def extract_book_info(image_bytes: bytes) -> dict:
         prompt = 'Extract title and author. Return JSON only: {"title": "", "author": ""}'
 
         response = client.models.generate_content(
-            model='gemini-3s.5-flash',
+            model='gemini-3.5-flash',
             contents=[image, prompt],
             config=types.GenerateContentConfig(
                 max_output_tokens=100,
