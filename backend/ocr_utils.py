@@ -13,20 +13,15 @@ client = genai.Client()
 
 def extract_book_info(image_bytes: bytes) -> dict:
     try:
-        # Load image and resize it to save visual tokens (covers don't need 4K resolution)
+        # Load image without thumbnail restriction
         image = Image.open(io.BytesIO(image_bytes))
-        image.thumbnail((800, 800))
 
-        # Ultra-short prompt to save input tokens
-        prompt = 'Extract title and author. Return JSON only: {"title": "", "author": ""}'
+        # Standard prompt to extract book details
+        prompt = "Extract the book title and author from this cover image. Return as a JSON object with keys 'title' and 'author'."
 
         response = client.models.generate_content(
             model='gemini-3.5-flash',
-            contents=[image, prompt],
-            config=types.GenerateContentConfig(
-                max_output_tokens=100,
-                temperature=0.0
-            )
+            contents=[image, prompt]
         )
         
         raw_text = response.text.strip()
@@ -39,7 +34,7 @@ def extract_book_info(image_bytes: bytes) -> dict:
         title = data.get("title", "").strip()
         author = data.get("author", "").strip()
         
-        # Check if the AI returned empty or unknown values
+        # Check if the AI returned empty or unknown values and show as an error
         if not title or title.lower() == "unknown" or not author or author.lower() == "unknown":
             raise HTTPException(
                 status_code=400, 
