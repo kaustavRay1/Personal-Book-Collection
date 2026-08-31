@@ -197,7 +197,7 @@ def lookup_isbn(isbn: str):
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         max_output_tokens=150,
-                        temperature=0.1
+                        temperature=0.0
                     )
                 )
                 
