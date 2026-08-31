@@ -14,7 +14,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
 
-  // Scanner Modes: 'cover', 'barcode', 'isbn', 'manual'
+  // Scanner Modes: 'cover', 'isbn', 'manual'
   const [scannerMode, setScannerMode] = useState('cover');
   const [manualIsbn, setManualIsbn] = useState('');
   
@@ -22,7 +22,7 @@ export default function App() {
   const [manualTitle, setManualTitle] = useState('');
   const [manualAuthor, setManualAuthor] = useState('');
 
-  // Camera stream states
+  // Camera stream states for Cover AI scan
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -66,11 +66,7 @@ export default function App() {
       const data = await res.json();
       
       if (!res.ok) {
-        if (res.status === 429) {
-          alert(data.detail.message || "API rate limit exceeded. Try AI Cover Scan or Manual Entry.");
-        } else {
-          alert(data.detail || "Book not found for this ISBN.");
-        }
+        alert(data.detail || "Book not found for this ISBN.");
         setLoading(false);
         return;
       }
@@ -84,7 +80,7 @@ export default function App() {
     }
   };
 
-  // Start live webcam stream
+  // Start live webcam stream for cover photo
   const startCamera = async () => {
     setIsCameraOpen(true);
     setScanResult(null);
@@ -109,7 +105,7 @@ export default function App() {
     setIsCameraOpen(false);
   };
 
-  // Capture photo based on active mode (Cover AI vs Barcode Scan)
+  // Capture image from video stream for Gemini AI scan
   const capturePhoto = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -121,14 +117,9 @@ export default function App() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     canvas.toBlob((blob) => {
-      const file = new File([blob], "captured-image.jpg", { type: "image/jpeg" });
+      const file = new File([blob], "captured-book.jpg", { type: "image/jpeg" });
       stopCamera();
-      
-      if (scannerMode === 'cover') {
-        processImageScan(file);
-      } else if (scannerMode === 'barcode') {
-        processBarcodeScan(file);
-      }
+      processImageScan(file);
     }, 'image/jpeg');
   };
 
@@ -149,37 +140,6 @@ export default function App() {
     } catch (err) {
       alert("Error scanning cover image via backend server.");
     } finally {
-      setLoading(false);
-    }
-  };
-
-  // Barcode Image Processing Function (ISBN Barcode Snap)
-  const processBarcodeScan = async (fileToScan) => {
-    if (!fileToScan) return;
-    setLoading(true);
-    setScanResult(null);
-
-    const formData = new FormData();
-    formData.append('file', fileToScan);
-
-    try {
-      const res = await fetch(`${API_BASE}/scan-barcode/`, { method: 'POST', body: formData });
-      const data = await res.json();
-      console.log("📥 Raw Scan API Response:", data);
-      
-      if (!res.ok) {
-        alert(data.detail || "Could not read barcode.");
-        setLoading(false);
-        console.log("📥 Raw Scan API Response:", data);
-        return;
-      }
-
-      // Automatically trigger ISBN lookup using the decoded barcode number
-      setManualIsbn(data.isbn);
-      lookupIsbn(data.isbn);
-      console.log("📥 Raw Scan API Response:", data);
-    } catch (err) {
-      alert("Error scanning barcode image.");
       setLoading(false);
     }
   };
@@ -272,28 +232,22 @@ export default function App() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '5px' }}>
             <h3 style={{ margin: 0 }}>🔍 Check Stock</h3>
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '5px' }}>
               <button 
                 onClick={() => { setScannerMode('cover'); setScanResult(null); stopCamera(); }}
-                style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem', backgroundColor: scannerMode === 'cover' ? 'var(--primary)' : '#64748b' }}
+                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', backgroundColor: scannerMode === 'cover' ? 'var(--primary)' : '#64748b' }}
               >
-                AI Cover
-              </button>
-              <button 
-                onClick={() => { setScannerMode('barcode'); setScanResult(null); stopCamera(); }}
-                style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem', backgroundColor: scannerMode === 'barcode' ? 'var(--primary)' : '#64748b' }}
-              >
-                Scan Barcode
+                AI Cover Scan
               </button>
               <button 
                 onClick={() => { setScannerMode('isbn'); setScanResult(null); stopCamera(); }}
-                style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem', backgroundColor: scannerMode === 'isbn' ? 'var(--primary)' : '#64748b' }}
+                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', backgroundColor: scannerMode === 'isbn' ? 'var(--primary)' : '#64748b' }}
               >
-                Type ISBN
+                ISBN Search
               </button>
               <button 
                 onClick={() => { setScannerMode('manual'); setScanResult(null); stopCamera(); }}
-                style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem', backgroundColor: scannerMode === 'manual' ? 'var(--primary)' : '#64748b' }}
+                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', backgroundColor: scannerMode === 'manual' ? 'var(--primary)' : '#64748b' }}
               >
                 Manual Entry
               </button>
@@ -329,36 +283,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Mode 2: ISBN Barcode Snap */}
-          {scannerMode === 'barcode' && (
-            <div>
-              {!isCameraOpen ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <button onClick={startCamera} style={{ backgroundColor: '#0284c7' }}>
-                    📷 Snap Book Barcode (Back Cover)
-                  </button>
-                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>— OR UPLOAD BARCODE IMAGE —</div>
-                  <form onSubmit={(e) => { e.preventDefault(); processBarcodeScan(selectedFile); }}>
-                    <input type="file" accept="image/*" onChange={(e) => setSelectedFile(e.target.files[0])} required />
-                    <button type="submit" disabled={loading || !selectedFile}>
-                      {loading ? "Scanning Barcode..." : "Scan Barcode from File"}
-                    </button>
-                  </form>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
-                  <video ref={videoRef} autoPlay playsInline style={{ width: '100%', borderRadius: '8px', maxHeight: '300px', objectFit: 'cover' }} />
-                  <canvas ref={canvasRef} style={{ display: 'none' }} />
-                  <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
-                    <button onClick={capturePhoto} style={{ flex: 1, backgroundColor: '#10b981' }}>🎯 Snap Barcode</button>
-                    <button onClick={stopCamera} style={{ flex: 1, backgroundColor: '#64748b' }}>Cancel</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Mode 3: Manual ISBN Text Lookup */}
+          {/* Mode 2: Manual ISBN Text Lookup */}
           {scannerMode === 'isbn' && (
             <form onSubmit={(e) => { e.preventDefault(); lookupIsbn(manualIsbn); }} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
@@ -366,19 +291,19 @@ export default function App() {
               </p>
               <input 
                 type="text" 
-                placeholder="e.g., 9789384850005" 
+                placeholder="e.g., 9780143127741" 
                 value={manualIsbn}
                 onChange={(e) => setManualIsbn(e.target.value)}
                 style={{ padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-color)', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box' }}
                 required 
               />
               <button type="submit" disabled={loading || !manualIsbn.trim()}>
-                {loading ? "Searching..." : "Lookup ISBN"}
+                {loading ? "Searching Database..." : "Lookup ISBN"}
               </button>
             </form>
           )}
 
-          {/* Mode 4: Direct Manual Insert */}
+          {/* Mode 3: Direct Manual Insert */}
           {scannerMode === 'manual' && (
             <form onSubmit={handleManualSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
@@ -431,7 +356,7 @@ export default function App() {
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <h3>🏠 My Home Library ({myBooks.length})</h3>
           {myBooks.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)' }}>No books in stock yet. Use any option above to add books!</p>
+            <p style={{ color: 'var(--text-muted)' }}>No books in stock yet. Use AI Cover Scan, ISBN Search, or Manual Entry above!</p>
           ) : (
             <ul className="book-list">
               {myBooks.map((b) => (
