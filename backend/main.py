@@ -173,37 +173,60 @@ def lookup_isbn(isbn: str):
     # ==========================================
     # 3. THIRD BACKUP: Gemini API Fallback
     # ==========================================
-    try:
-        print(f"⚠️ Databases missed ISBN {clean_isbn}. Querying Gemini AI fallback...")
-        prompt = (
-            f"Provide the book title and primary author associated with the ISBN: {clean_isbn}. "
-            "Return ONLY a clean JSON object with keys 'title' and 'author'. "
-            "If you do not know it with high confidence, set title to 'Unknown' and author to 'Unknown'."
-        )
-        
-        response = ai_client.models.generate_content(
-            model='gemini-3.5-flash',
-            contents=prompt,
-        )
-        
-        text_response = response.text.strip()
-        if text_response.startswith("```"):
-            text_response = text_response.split("```")[1]
-            if text_response.startswith("json"):
-                text_response = text_response[4:].strip()
-                
-        gemini_data = json.loads(text_response)
-        
-        if gemini_data.get("title") and gemini_data.get("title") != "Unknown":
-            return {
-                "title": gemini_data.get("title"),
-                "author": gemini_data.get("author", "Unknown Author"),
-                "isbn": clean_isbn,
-                "source": "Gemini AI Fallback"
-            }
+   # ==========================================
+    # 3. THIRD BACKUP: Gemini AI Fallback with Multi-Model Failover
+    # ==========================================
+    import time
+
+    gemini_data = None
+    # List of models to try in sequence if 503 errors occur
+    fallback_models = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.7-flash']
+
+    for model_name in fallback_models:
+        if gemini_data:
+            break
             
-    except Exception as e:
-        print(f"Gemini API fallback error: {e}")
+        for attempt in range(2): # 2 attempts per model
+            try:
+                print(f"⚠️ Querying Gemini AI fallback using model: {model_name} (Attempt {attempt + 1})...")
+                prompt = (
+                    f"Provide the book title and primary author associated with the ISBN: {clean_isbn}. "
+                    "Return ONLY a clean JSON object with keys 'title' and 'author'. "
+                    "If you do not know it with high confidence, set title to 'Unknown' and author to 'Unknown'."
+                )
+                
+                response = ai_client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                
+                text_response = response.text.strip()
+                if text_response.startswith("```"):
+                    text_response = text_response.split("```")[1]
+                    if text_response.startswith("json"):
+                        text_response = text_response[4:].strip()
+                        
+                gemini_data = json.loads(text_response)
+                
+                if gemini_data and gemini_data.get("title") and gemini_data.get("title") != "Unknown":
+                    break # Successfully found book data!
+                else:
+                    gemini_data = None # Reset if it returned 'Unknown' so it tries next model
+                    
+            except Exception as e:
+                print(f"❌ Model {model_name} attempt {attempt + 1} error: {e}")
+                if "503" in str(e) or "UNAVAILABLE" in str(e):
+                    time.sleep(1) # Brief pause before retry/next model
+                else:
+                    break # Non-503 errors should break out to the next model immediately
+
+    if gemini_data and gemini_data.get("title") and gemini_data.get("title") != "Unknown":
+        return {
+            "title": gemini_data.get("title"),
+            "author": gemini_data.get("author", "Unknown Author"),
+            "isbn": clean_isbn,
+            "source": "Gemini AI Fallback"
+        }
 
     # ==========================================
     # FINAL FALLBACK: Not Found Error
