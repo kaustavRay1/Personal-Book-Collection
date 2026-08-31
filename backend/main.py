@@ -1,10 +1,7 @@
-import os
-import json
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from google import genai
 import ocr_utils
 
 app = FastAPI(title="Personal Book Collection Backend")
@@ -16,9 +13,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize Gemini Client
-ai_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
 class ManualBookCreate(BaseModel):
     title: str
@@ -50,7 +44,7 @@ def add_manual_book(book: ManualBookCreate):
 
 @app.get("/lookup-isbn/{isbn}")
 def lookup_isbn(isbn: str):
-    """ISBN Text Lookup: 3-Tier Fallback (Open Library -> Google Books -> Gemini AI)."""
+    """ISBN Text Lookup: Open Library -> Google Books."""
     clean_isbn = isbn.replace("-", "").strip()
     
     if not clean_isbn:
@@ -104,48 +98,22 @@ def lookup_isbn(isbn: str):
                 }
                 
         elif gb_res.status_code == 429:
-            print("⚠️ Google Books rate limit hit (429). Proceeding to Gemini Fallback.")
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "Google Books API rate limit exceeded.",
+                    "retry_after_seconds": 60,
+                    "message": "Google Books quota reached. Please use AI Cover Scan or insert manually."
+                }
+            )
             
+    except HTTPException as he:
+        raise he
     except Exception as e:
         print(f"Google Books fallback error: {e}")
 
     # ==========================================
-    # 3. THIRD BACKUP: Gemini AI Fallback
-    # ==========================================
-    try:
-        print(f"⚠️ Databases missed ISBN {clean_isbn}. Querying Gemini AI fallback...")
-        prompt = (
-            f"Provide the book title and primary author associated with the ISBN: {clean_isbn}. "
-            "Return ONLY a clean JSON object with keys 'title' and 'author'. "
-            "If you do not know it with high confidence, set title to 'Unknown' and author to 'Unknown'."
-        )
-        
-        response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        
-        text_response = response.text.strip()
-        if text_response.startswith("```"):
-            text_response = text_response.split("```")[1]
-            if text_response.startswith("json"):
-                text_response = text_response[4:].strip()
-                
-        gemini_data = json.loads(text_response)
-        
-        if gemini_data.get("title") and gemini_data.get("title") != "Unknown":
-            return {
-                "title": gemini_data.get("title"),
-                "author": gemini_data.get("author", "Unknown Author"),
-                "isbn": clean_isbn,
-                "source": "Gemini AI Fallback"
-            }
-            
-    except Exception as e:
-        print(f"Gemini API fallback error: {e}")
-
-    # ==========================================
-    # FINAL FALLBACK: Not Found Error
+    # NOT FOUND ERROR
     # ==========================================
     raise HTTPException(
         status_code=404, 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { auth, db, provider } from './firebase';
 import { signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, addDoc, onSnapshot, query, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, serverTimestamp, deleteDoc, doc } from 'firebase/firestore';
 import './App.css';
 
 const API_BASE = "https://personal-book-collection-backend.onrender.com";
@@ -66,7 +66,7 @@ export default function App() {
       const data = await res.json();
       
       if (!res.ok) {
-        alert(data.detail || "Book not found for this ISBN.");
+        alert(data.detail?.message || data.detail || "Book not found for this ISBN.");
         setLoading(false);
         return;
       }
@@ -191,6 +191,18 @@ export default function App() {
     } catch (err) {
       console.error("Firebase Add Error:", err);
       alert("Failed to save book to Firebase.");
+    }
+  };
+
+  // Handle Book Removal from Firestore
+  const handleRemoveBook = async (bookId, bookTitle) => {
+    if (!window.confirm(`Are you sure you want to remove "${bookTitle}" from your library?`)) return;
+
+    try {
+      await deleteDoc(doc(db, "users", user.uid, "books", bookId));
+    } catch (err) {
+      console.error("Firestore Delete Error:", err);
+      alert("Failed to remove book from Firebase.");
     }
   };
 
@@ -360,9 +372,26 @@ export default function App() {
           ) : (
             <ul className="book-list">
               {myBooks.map((b) => (
-                <li key={b.id}>
-                  <strong>{b.title}</strong>
-                  <span>by {b.author}</span>
+                <li key={b.id} style={{ display: 'flex', justifyContent: 'space-linejoin', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ flex: 1 }}>
+                    <strong>{b.title}</strong>
+                    <span style={{ marginLeft: '6px', color: 'var(--text-muted)' }}>by {b.author}</span>
+                  </div>
+                  <button 
+                    onClick={() => handleRemoveBook(b.id, b.title)} 
+                    style={{ 
+                      width: 'auto', 
+                      backgroundColor: '#ef4444', 
+                      color: '#fff', 
+                      border: 'none', 
+                      padding: '0.3rem 0.6rem', 
+                      fontSize: '0.75rem', 
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🗑️ Remove
+                  </button>
                 </li>
               ))}
             </ul>
