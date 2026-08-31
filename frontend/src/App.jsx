@@ -22,6 +22,9 @@ export default function App() {
   const [manualTitle, setManualTitle] = useState('');
   const [manualAuthor, setManualAuthor] = useState('');
 
+  // UI State for tracking which book is currently prompting a delete confirmation
+  const [deletingId, setDeletingId] = useState(null);
+
   // Camera stream states for Cover AI scan
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const videoRef = useRef(null);
@@ -194,12 +197,11 @@ export default function App() {
     }
   };
 
-  // Handle Book Removal from Firestore
-  const handleRemoveBook = async (bookId, bookTitle) => {
-    if (!window.confirm(`Are you sure you want to remove "${bookTitle}" from your library?`)) return;
-
+  // Smooth UI Execution for Deleting Book from Firestore
+  const confirmRemoveBook = async (bookId) => {
     try {
       await deleteDoc(doc(db, "users", user.uid, "books", bookId));
+      setDeletingId(null);
     } catch (err) {
       console.error("Firestore Delete Error:", err);
       alert("Failed to remove book from Firebase.");
@@ -364,7 +366,7 @@ export default function App() {
           )}
         </div>
 
-        {/* My Library Display Card */}
+        {/* My Library Display Card with Inline Confirmation UI */}
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <h3>🏠 My Home Library ({myBooks.length})</h3>
           {myBooks.length === 0 ? (
@@ -372,26 +374,52 @@ export default function App() {
           ) : (
             <ul className="book-list">
               {myBooks.map((b) => (
-                <li key={b.id} style={{ display: 'flex', justifyContent: 'space-linejoin', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ flex: 1 }}>
-                    <strong>{b.title}</strong>
-                    <span style={{ marginLeft: '6px', color: 'var(--text-muted)' }}>by {b.author}</span>
-                  </div>
-                  <button 
-                    onClick={() => handleRemoveBook(b.id, b.title)} 
-                    style={{ 
-                      width: 'auto', 
-                      backgroundColor: '#ef4444', 
-                      color: '#fff', 
-                      border: 'none', 
-                      padding: '0.3rem 0.6rem', 
-                      fontSize: '0.75rem', 
-                      borderRadius: '4px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    🗑️ Remove
-                  </button>
+                <li key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', position: 'relative', overflow: 'hidden' }}>
+                  {deletingId === b.id ? (
+                    // Inline confirmation view
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', background: 'rgba(239, 68, 68, 0.1)', padding: '4px 8px', borderRadius: '6px' }}>
+                      <span style={{ fontSize: '0.85rem', color: '#ef4444', fontWeight: '500' }}>Remove this book?</span>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button 
+                          onClick={() => confirmRemoveBook(b.id)}
+                          style={{ width: 'auto', backgroundColor: '#ef4444', color: '#fff', border: 'none', padding: '0.2rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                          Yes
+                        </button>
+                        <button 
+                          onClick={() => setDeletingId(null)}
+                          style={{ width: 'auto', backgroundColor: '#64748b', color: '#fff', border: 'none', padding: '0.2rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    // Standard view
+                    <>
+                      <div style={{ flex: 1 }}>
+                        <strong>{b.title}</strong>
+                        <span style={{ marginLeft: '6px', color: 'var(--text-muted)' }}>by {b.author}</span>
+                      </div>
+                      <button 
+                        onClick={() => setDeletingId(b.id)} 
+                        title="Remove book"
+                        style={{ 
+                          width: 'auto', 
+                          background: 'transparent', 
+                          color: '#ef4444', 
+                          border: '1px solid #ef4444', 
+                          padding: '0.25rem 0.5rem', 
+                          fontSize: '0.75rem', 
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        🗑️ Remove
+                      </button>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
