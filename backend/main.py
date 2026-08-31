@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 import cv2
 import numpy as np
 from google import genai
+from google.genai import types  # Required for free-tier token/temperature configs
 import ocr_utils
 
 app = FastAPI(title="Personal Book Collection Backend")
@@ -40,11 +42,11 @@ async def scan_barcode(file: UploadFile = File(...)):
             
         detector = cv2.barcode.BarcodeDetector()
         
-        # Pass 1: Try decoding on grayscale image for better contrast detection
+        # Pass 1: Grayscale check
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         retval, decoded_info, decoded_type = detector.detectAndDecode(gray)
         
-        # Pass 2: Fallback to color image if grayscale scan doesn't catch it
+        # Pass 2: Color check fallback
         if not retval or not decoded_info:
             retval, decoded_info, decoded_type = detector.detectAndDecode(img)
         
@@ -60,7 +62,6 @@ async def scan_barcode(file: UploadFile = File(...)):
             for code in codes:
                 if code:
                     clean_code = str(code).strip()
-                    # Check for 13-digit ISBN (978/979) or 10-digit ISBN
                     if (clean_code.startswith(("978", "979")) and len(clean_code) == 13) or len(clean_code) == 10:
                         isbn_number = clean_code
                         break
@@ -111,7 +112,7 @@ def add_manual_book(book: ManualBookCreate):
 
 @app.get("/lookup-isbn/{isbn}")
 def lookup_isbn(isbn: str):
-    """ISBN Text Lookup: 3-Tier Fallback (Open Library -> Google Books -> Gemini AI)."""
+    """ISBN Text Lookup: Open Library -> Google Books -> Gemini 3 Family Fallback."""
     clean_isbn = isbn.replace("-", "").strip()
     
     if not clean_isbn:
@@ -165,39 +166,39 @@ def lookup_isbn(isbn: str):
                 }
                 
         elif gb_res.status_code == 429:
-            print("⚠️ Google Books rate limit hit (429). Proceeding to Gemini Fallback.")
+            print("⚠️ Google Books rate limit hit (429). Proceeding to Gemini 3 Fallback.")
             
     except Exception as e:
         print(f"Google Books fallback error: {e}")
 
     # ==========================================
-    # 3. THIRD BACKUP: Gemini API Fallback
+    # 3. THIRD BACKUP: Gemini 3 Family Fallback (Optimized for Free Tier)
     # ==========================================
-   # ==========================================
-    # 3. THIRD BACKUP: Gemini AI Fallback with Multi-Model Failover
-    # ==========================================
-    import time
-
     gemini_data = None
-    # List of models to try in sequence if 503 errors occur
-    fallback_models = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.7-flash']
+    # Cascading across Gemini 3 models to gracefully bypass 503 traffic spikes
+    fallback_models = ['gemini-3.7-flash', 'gemini-3.5-flash-lite']
 
     for model_name in fallback_models:
         if gemini_data:
             break
             
-        for attempt in range(2): # 2 attempts per model
+        for attempt in range(2):
             try:
-                print(f"⚠️ Querying Gemini AI fallback using model: {model_name} (Attempt {attempt + 1})...")
+                print(f"⚠️ Querying Gemini AI ({model_name}) fallback (Attempt {attempt + 1})...")
                 prompt = (
                     f"Provide the book title and primary author associated with the ISBN: {clean_isbn}. "
                     "Return ONLY a clean JSON object with keys 'title' and 'author'. "
-                    "If you do not know it with high confidence, set title to 'Unknown' and author to 'Unknown'."
+                    "If unknown, set both to 'Unknown'."
                 )
                 
+                # Free-tier optimizations: restrict token length and enforce low temperature
                 response = ai_client.models.generate_content(
                     model=model_name,
                     contents=prompt,
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=150,
+                        temperature=0.1
+                    )
                 )
                 
                 text_response = response.text.strip()
@@ -209,16 +210,16 @@ def lookup_isbn(isbn: str):
                 gemini_data = json.loads(text_response)
                 
                 if gemini_data and gemini_data.get("title") and gemini_data.get("title") != "Unknown":
-                    break # Successfully found book data!
+                    break
                 else:
-                    gemini_data = None # Reset if it returned 'Unknown' so it tries next model
+                    gemini_data = None
                     
             except Exception as e:
                 print(f"❌ Model {model_name} attempt {attempt + 1} error: {e}")
                 if "503" in str(e) or "UNAVAILABLE" in str(e):
-                    time.sleep(1) # Brief pause before retry/next model
+                    time.sleep(1)
                 else:
-                    break # Non-503 errors should break out to the next model immediately
+                    break
 
     if gemini_data and gemini_data.get("title") and gemini_data.get("title") != "Unknown":
         return {
